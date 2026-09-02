@@ -10,6 +10,7 @@
 package rle
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/parquet-go/parquet-go/encoding/fuzz"
@@ -91,5 +92,58 @@ func TestDecodeInt32LargeRun(t *testing.T) {
 		if v != 1 {
 			t.Fatalf("value at index %d: expected 1, got %d", i, v)
 		}
+	}
+}
+
+func BenchmarkEncodeInt32Bitpack(b *testing.B) {
+	words := make([][8]int32, 128)
+	for i := range words {
+		for j := range words[i] {
+			words[i][j] = int32(i+j) & 0x7FFF
+		}
+	}
+	dst := make([]byte, len(words)*16+32)
+	for _, bitWidth := range []uint{1, 2, 5, 8, 15} {
+		b.Run(fmt.Sprintf("bitWidth=%d", bitWidth), func(b *testing.B) {
+			b.SetBytes(int64(len(words) * 32))
+			for b.Loop() {
+				encodeInt32Bitpack(dst, words, bitWidth)
+			}
+		})
+	}
+}
+
+func BenchmarkEncodeBytesBitpack(b *testing.B) {
+	src := make([]uint64, 128)
+	for i := range src {
+		src[i] = uint64(i) * 0x0101010101010101
+	}
+	dst := make([]byte, len(src)*8+8)
+	for _, bitWidth := range []uint{1, 2, 3, 5, 8} {
+		b.Run(fmt.Sprintf("bitWidth=%d", bitWidth), func(b *testing.B) {
+			b.SetBytes(int64(len(src) * 8))
+			for b.Loop() {
+				encodeBytesBitpack(dst, src, bitWidth)
+			}
+		})
+	}
+}
+
+func BenchmarkDecodeBytesBitpack(b *testing.B) {
+	words := 128
+	src := make([]uint64, words)
+	for i := range src {
+		src[i] = uint64(i) * 0x0101010101010101
+	}
+	buf := make([]byte, words*8+8)
+	dst := make([]byte, words*8)
+	for _, bitWidth := range []uint{1, 2, 3, 5, 8} {
+		n := encodeBytesBitpack(buf, src, bitWidth)
+		b.Run(fmt.Sprintf("bitWidth=%d", bitWidth), func(b *testing.B) {
+			b.SetBytes(int64(words * 8))
+			for b.Loop() {
+				decodeBytesBitpack(dst, buf[:n], uint(words*8), bitWidth)
+			}
+		})
 	}
 }
